@@ -70,7 +70,10 @@ entry:
 define <8 x i8> @test_concat_truncate_v4i16_to_v8i8(<4 x i16> %a, <4 x i16> %b) #0 {
 ; CHECK-LABEL: test_concat_truncate_v4i16_to_v8i8:
 ; CHECK:       // %bb.0: // %entry
-; CHECK-NEXT:    uzp1 v0.8b, v0.8b, v1.8b
+; CHECK-NEXT:    // kill: def $d0 killed $d0 def $q0
+; CHECK-NEXT:    // kill: def $d1 killed $d1 def $q1
+; CHECK-NEXT:    mov v0.d[1], v1.d[0]
+; CHECK-NEXT:    xtn v0.8b, v0.8h
 ; CHECK-NEXT:    ret
 entry:
   %at = trunc <4 x i16> %a to <4 x i8>

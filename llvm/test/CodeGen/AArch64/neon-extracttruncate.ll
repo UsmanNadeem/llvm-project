@@ -4,7 +4,10 @@
 define <8 x i8> @extract_2_v4i16(<4 x i16> %a, <4 x i16> %b) {
 ; CHECK-LABEL: extract_2_v4i16:
 ; CHECK:       // %bb.0: // %entry
-; CHECK-NEXT:    uzp1 v0.8b, v0.8b, v1.8b
+; CHECK-NEXT:    // kill: def $d0 killed $d0 def $q0
+; CHECK-NEXT:    // kill: def $d1 killed $d1 def $q1
+; CHECK-NEXT:    mov v0.d[1], v1.d[0]
+; CHECK-NEXT:    xtn v0.8b, v0.8h
 ; CHECK-NEXT:    ret
 entry:
   %a0 = extractelement <4 x i16> %a, i32 0
@@ -37,20 +40,8 @@ entry:
 define <8 x i8> @extract_2_v4i32(<4 x i32> %a, <4 x i32> %b) {
 ; CHECK-LABEL: extract_2_v4i32:
 ; CHECK:       // %bb.0: // %entry
-; CHECK-NEXT:    mov w8, v0.s[1]
-; CHECK-NEXT:    mov w9, v0.s[2]
-; CHECK-NEXT:    mov w10, v0.s[3]
-; CHECK-NEXT:    mov v0.b[1], w8
-; CHECK-NEXT:    mov w8, v1.s[1]
-; CHECK-NEXT:    mov v0.b[2], w9
-; CHECK-NEXT:    mov w9, v1.s[2]
-; CHECK-NEXT:    mov v0.b[3], w10
-; CHECK-NEXT:    mov v0.b[4], v1.b[0]
-; CHECK-NEXT:    mov v0.b[5], w8
-; CHECK-NEXT:    mov w8, v1.s[3]
-; CHECK-NEXT:    mov v0.b[6], w9
-; CHECK-NEXT:    mov v0.b[7], w8
-; CHECK-NEXT:    // kill: def $d0 killed $d0 killed $q0
+; CHECK-NEXT:    uzp1 v0.8h, v0.8h, v1.8h
+; CHECK-NEXT:    xtn v0.8b, v0.8h
 ; CHECK-NEXT:    ret
 entry:
   %a0 = extractelement <4 x i32> %a, i32 0

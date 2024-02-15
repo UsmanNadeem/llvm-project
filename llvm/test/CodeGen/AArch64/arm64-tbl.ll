@@ -316,7 +316,7 @@ define <16 x i8> @shuffled_tbl2_to_tbl4_nonconst_second_mask2(<16 x i8> %a, <16 
 ; CHECK-LABEL: shuffled_tbl2_to_tbl4_nonconst_second_mask2:
 ; CHECK:       // %bb.0:
 ; CHECK-NEXT:    dup.16b v4, w0
-; CHECK-NEXT:    mov w8, #255 // =0xff
+; CHECK-NEXT:    mov w8, #-1 // =0xffffffff
 ; CHECK-NEXT:    // kill: def $q3 killed $q3 killed $q2_q3 def $q2_q3
 ; CHECK-NEXT:    // kill: def $q1 killed $q1 killed $q0_q1 def $q0_q1
 ; CHECK-NEXT:    // kill: def $q2 killed $q2 killed $q2_q3 def $q2_q3

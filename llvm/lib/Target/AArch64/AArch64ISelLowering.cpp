@@ -11372,51 +11372,84 @@ static bool isSingletonEXTMask(ArrayRef<int> M, EVT VT, unsigned &Imm) {
 // Detect patterns of a0,a1,a2,a3,b0,b1,b2,b3,c0,c1,c2,c3,d0,d1,d2,d3 from
 // v4i32s. This is really a truncate, which we can construct out of (legal)
 // concats and truncate nodes.
-static SDValue ReconstructTruncateFromBuildVector(SDValue V, SelectionDAG &DAG) {
-  if (V.getValueType() != MVT::v16i8)
+static SDValue ReconstructTruncateFromBuildVector(SDValue V,
+                                                  SelectionDAG &DAG) {
+  EVT BVTy = V.getValueType();
+  if (BVTy != MVT::v16i8 && BVTy != MVT::v8i16 && BVTy != MVT::v8i8)
     return SDValue();
-  assert(V.getNumOperands() == 16 && "Expected 16 operands on the BUILDVECTOR");
 
-  for (unsigned X = 0; X < 4; X++) {
-    // Check the first item in each group is an extract from lane 0 of a v4i32
-    // or v4i16.
-    SDValue BaseExt = V.getOperand(X * 4);
-    if (BaseExt.getOpcode() != ISD::EXTRACT_VECTOR_ELT ||
-        (BaseExt.getOperand(0).getValueType() != MVT::v4i16 &&
-         BaseExt.getOperand(0).getValueType() != MVT::v4i32) ||
-        !isa<ConstantSDNode>(BaseExt.getOperand(1)) ||
-        BaseExt.getConstantOperandVal(1) != 0)
+  // Only handle truncating BVs, all BV operands have the same type.
+  if (V.getOperand(0).getValueType().getSizeInBits() ==
+      BVTy.getScalarSizeInBits())
+    return SDValue();
+
+  SmallVector<SDValue, 4> Sources;
+  uint64_t LastIdxSeen = 0;
+  uint64_t MaxIdxSeen = 0;
+  // Check for sequential indices e.g. i=0, i+1, ..., i=0, i+1, ...
+  for (SDValue Extr : V->ops()) {
+    SDValue SourceVec = Extr.getOperand(0);
+    EVT SourceVecTy = SourceVec.getValueType();
+
+    if (!DAG.getTargetLoweringInfo().isTypeLegal(SourceVecTy))
       return SDValue();
-    SDValue Base = BaseExt.getOperand(0);
-    // And check the other items are extracts from the same vector.
-    for (unsigned Y = 1; Y < 4; Y++) {
-      SDValue Ext = V.getOperand(X * 4 + Y);
-      if (Ext.getOpcode() != ISD::EXTRACT_VECTOR_ELT ||
-          Ext.getOperand(0) != Base ||
-          !isa<ConstantSDNode>(Ext.getOperand(1)) ||
-          Ext.getConstantOperandVal(1) != Y)
-        return SDValue();
-    }
+
+    if (!isa<ConstantSDNode>(Extr.getOperand(1)))
+      return SDValue();
+    uint64_t CurIdx = Extr.getConstantOperandVal(1);
+    // Allow repeat of sources.
+    if (CurIdx == 0)
+      Sources.push_back(SourceVec);
+    else if (CurIdx != LastIdxSeen + 1)
+      return SDValue();
+
+    LastIdxSeen = CurIdx;
+    MaxIdxSeen = std::max(MaxIdxSeen, CurIdx);
   }
 
-  // Turn the buildvector into a series of truncates and concates, which will
-  // become uzip1's. Any v4i32s we found get truncated to v4i16, which are
-  // concat together to produce 2 v8i16. These are both truncated and concat
-  // together.
+  // Sanity checks to keep code simple.
+  if (Sources.size() % 2 != 0)
+    return SDValue();
+  // Check if all lanes are used by BV, all sources have the same type.
+  if (MaxIdxSeen + 1 != Sources[0].getValueType().getVectorNumElements())
+    return SDValue();
+  // Equal number of elements from each source.
+  if (((MaxIdxSeen + 1) * Sources.size()) != BVTy.getVectorNumElements())
+    return SDValue();
+
+  // At this point we know that we have a truncating BV of extract_vector_elt.
+  // We can just truncated and concat them.
   SDLoc DL(V);
-  SDValue Trunc[4] = {
-      V.getOperand(0).getOperand(0), V.getOperand(4).getOperand(0),
-      V.getOperand(8).getOperand(0), V.getOperand(12).getOperand(0)};
-  for (SDValue &V : Trunc)
-    if (V.getValueType() == MVT::v4i32)
-      V = DAG.getNode(ISD::TRUNCATE, DL, MVT::v4i16, V);
-  SDValue Concat0 =
-      DAG.getNode(ISD::CONCAT_VECTORS, DL, MVT::v8i16, Trunc[0], Trunc[1]);
-  SDValue Concat1 =
-      DAG.getNode(ISD::CONCAT_VECTORS, DL, MVT::v8i16, Trunc[2], Trunc[3]);
-  SDValue Trunc0 = DAG.getNode(ISD::TRUNCATE, DL, MVT::v8i8, Concat0);
-  SDValue Trunc1 = DAG.getNode(ISD::TRUNCATE, DL, MVT::v8i8, Concat1);
-  return DAG.getNode(ISD::CONCAT_VECTORS, DL, MVT::v16i8, Trunc0, Trunc1);
+  while (Sources.size() > 1) {
+    for (unsigned i = 0; i < Sources.size(); i += 2) {
+      SDValue V1 = Sources[i];
+      SDValue V2 = Sources[i + 1];
+      EVT VT1 = V1.getValueType();
+      EVT VT2 = V2.getValueType();
+
+      if (VT1.is128BitVector()) {
+        VT1 = VT1.changeVectorElementType(
+            VT1.getVectorElementType().getHalfSizedIntegerVT(
+                *DAG.getContext()));
+        V1 = DAG.getNode(ISD::TRUNCATE, DL, VT1, V1);
+      }
+      if (VT2.is128BitVector()) {
+        VT2 = VT2.changeVectorElementType(
+            VT2.getVectorElementType().getHalfSizedIntegerVT(
+                *DAG.getContext()));
+        V2 = DAG.getNode(ISD::TRUNCATE, DL, VT2, V2);
+      }
+
+      assert(VT1 == VT2 && "Mismatched types.");
+      Sources[i / 2] = DAG.getNode(
+          ISD::CONCAT_VECTORS, DL,
+          VT1.getDoubleNumVectorElementsVT(*DAG.getContext()), V1, V2);
+    }
+    Sources.resize(Sources.size() / 2);
+  }
+  if (Sources[0].getValueType() != BVTy)
+    return DAG.getNode(ISD::TRUNCATE, DL, BVTy, Sources[0]);
+  return Sources[0];
 }
 
 /// Check if a vector shuffle corresponds to a DUP instructions with a larger
@@ -12927,6 +12960,7 @@ static SDValue NormalizeBuildVector(SDValue Op,
     } else if (Lane.getNode()->isUndef()) {
       Lane = DAG.getUNDEF(MVT::i32);
     } else {
+      return Op;
       assert(Lane.getValueType() == MVT::i32 &&
              "Unexpected BUILD_VECTOR operand type");
     }
@@ -13273,8 +13307,9 @@ SDValue AArch64TargetLowering::LowerBUILD_VECTOR(SDValue Op,
   // Detect patterns of a0,a1,a2,a3,b0,b1,b2,b3,c0,c1,c2,c3,d0,d1,d2,d3 from
   // v4i32s. This is really a truncate, which we can construct out of (legal)
   // concats and truncate nodes.
-  if (SDValue M = ReconstructTruncateFromBuildVector(Op, DAG))
-    return M;
+  if (AllLanesExtractElt)
+    if (SDValue M = ReconstructTruncateFromBuildVector(Op, DAG))
+      return M;
 
   // Empirical tests suggest this is rarely worth it for vectors of length <= 2.
   if (NumElts >= 4) {
@@ -13384,7 +13419,8 @@ SDValue AArch64TargetLowering::LowerBUILD_VECTOR(SDValue Op,
   if (!isConstant && !usesOnlyOneValue) {
     LLVM_DEBUG(
         dbgs() << "LowerBUILD_VECTOR: alternatives failed, creating sequence "
-                  "of INSERT_VECTOR_ELT\n");
+                  "of INSERT_VECTOR_ELT\n";
+        DAG.dump(););
 
     SDValue Vec = DAG.getUNDEF(VT);
     SDValue Op0 = Op.getOperand(0);
@@ -13861,6 +13897,24 @@ SDValue AArch64TargetLowering::LowerTRUNCATE(SDValue Op,
   if (useSVEForFixedLengthVectorVT(Op.getOperand(0).getValueType(),
                                    !Subtarget->isNeonAvailable()))
     return LowerFixedLengthVectorTruncateToSVE(Op, DAG);
+
+  // dbgs() <<"=======================================\n\n\n";
+  // DAG.dump();
+  return SDValue();
+  // Truncate using shuffles.
+  SDValue N0 = Op.getOperand(0);
+  if (VT.is64BitVector() && N0.getOpcode() == ISD::CONCAT_VECTORS &&
+      VT.widenIntegerVectorElementType(*DAG.getContext()) ==
+          N0.getValueType()) {
+    SDLoc DL(Op);
+    SDValue V0 = DAG.getNode(ISD::BITCAST, DL, VT, N0.getOperand(0));
+    SDValue V1 = DAG.getNode(ISD::BITCAST, DL, VT, N0.getOperand(1));
+    SmallVector<int, 16> MaskVec;
+    for (unsigned i = 0; i < VT.getVectorNumElements() * 2; i += 2)
+      MaskVec.push_back(i);
+
+    return DAG.getVectorShuffle(VT, DL, V0, V1, MaskVec);
+  }
 
   return SDValue();
 }
@@ -19064,6 +19118,28 @@ static SDValue performBuildVectorCombine(SDNode *N,
   SDLoc DL(N);
   EVT VT = N->getValueType(0);
 
+  //    BUILD_VECTOR (extract_elt(Assert[S|Z]ext(x)))
+  // => BUILD_VECTOR (extract_elt(x))
+  SmallVector<SDValue, 8> Ops;
+  bool ExtractExtended = false;
+  for (SDValue Extr : N->ops()) {
+    if (Extr.getOpcode() != ISD::EXTRACT_VECTOR_ELT) {
+      ExtractExtended = false;
+      break;
+    }
+    SDValue ExtractBase = Extr.getOperand(0);
+    if (ExtractBase.getOpcode() == ISD::AssertSext ||
+        ExtractBase.getOpcode() == ISD::AssertZext) {
+      ExtractExtended = true;
+      Ops.push_back(DAG.getNode(ISD::EXTRACT_VECTOR_ELT, DL,
+                                Extr.getValueType(), ExtractBase.getOperand(0),
+                                Extr.getOperand(1)));
+    } else
+      Ops.push_back(Extr);
+  }
+  if (ExtractExtended)
+    return DAG.getBuildVector(VT, DL, Ops);
+
   // A build vector of two extracted elements is equivalent to an
   // extract subvector where the inner vector is any-extended to the
   // extract_vector_elt VT.
@@ -19109,13 +19185,14 @@ static SDValue performTruncateCombine(SDNode *N,
                                       SelectionDAG &DAG) {
   EVT VT = N->getValueType(0);
   SDValue N0 = N->getOperand(0);
+  SDLoc DL(N);
   if (VT.isFixedLengthVector() && VT.is64BitVector() && N0.hasOneUse() &&
       N0.getOpcode() == AArch64ISD::DUP) {
     SDValue Op = N0.getOperand(0);
     if (VT.getScalarType() == MVT::i32 &&
         N0.getOperand(0).getValueType().getScalarType() == MVT::i64)
-      Op = DAG.getNode(ISD::TRUNCATE, SDLoc(N), MVT::i32, Op);
-    return DAG.getNode(N0.getOpcode(), SDLoc(N), VT, Op);
+      Op = DAG.getNode(ISD::TRUNCATE, DL, MVT::i32, Op);
+    return DAG.getNode(N0.getOpcode(), DL, VT, Op);
   }
 
   return SDValue();
