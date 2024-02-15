@@ -19195,6 +19195,19 @@ static SDValue performTruncateCombine(SDNode *N,
     return DAG.getNode(N0.getOpcode(), DL, VT, Op);
   }
 
+  // return SDValue();
+  if (VT.is64BitVector() && N0.getOpcode() == ISD::CONCAT_VECTORS &&
+      VT.widenIntegerVectorElementType(*DAG.getContext()) ==
+          N0.getValueType()) {
+    SDValue V0 = DAG.getNode(ISD::BITCAST, DL, VT, N0.getOperand(0));
+    SDValue V1 = DAG.getNode(ISD::BITCAST, DL, VT, N0.getOperand(1));
+    SmallVector<int, 16> MaskVec;
+    for (unsigned i = 0; i < VT.getVectorNumElements() * 2; i += 2)
+      MaskVec.push_back(i);
+
+    return DAG.getVectorShuffle(VT, DL, V0, V1, MaskVec);
+  }
+
   return SDValue();
 }
 

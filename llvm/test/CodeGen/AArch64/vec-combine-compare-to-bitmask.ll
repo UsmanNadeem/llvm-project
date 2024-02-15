@@ -368,17 +368,17 @@ define i8 @convert_large_vector(<8 x i32> %vec) {
 ; CHECK:       ; %bb.0:
 ; CHECK-NEXT:    sub sp, sp, #16
 ; CHECK-NEXT:    .cfi_def_cfa_offset 16
-; CHECK-NEXT:    cmeq.4s v1, v1, #0
-; CHECK-NEXT:    cmeq.4s v0, v0, #0
+; CHECK-NEXT:    cmtst.4s v1, v1, v1
+; CHECK-NEXT:    cmtst.4s v0, v0, v0
 ; CHECK-NEXT:  Lloh30:
 ; CHECK-NEXT:    adrp x8, lCPI15_0@PAGE
 ; CHECK-NEXT:    uzp1.8h v0, v0, v1
 ; CHECK-NEXT:  Lloh31:
-; CHECK-NEXT:    ldr q1, [x8, lCPI15_0@PAGEOFF]
-; CHECK-NEXT:    bic.16b v0, v1, v0
-; CHECK-NEXT:    addv.8h h0, v0
-; CHECK-NEXT:    fmov w8, s0
-; CHECK-NEXT:    and w0, w8, #0xff
+; CHECK-NEXT:    ldr d1, [x8, lCPI15_0@PAGEOFF]
+; CHECK-NEXT:    xtn.8b v0, v0
+; CHECK-NEXT:    and.8b v0, v0, v1
+; CHECK-NEXT:    addv.8b b0, v0
+; CHECK-NEXT:    fmov w0, s0
 ; CHECK-NEXT:    add sp, sp, #16
 ; CHECK-NEXT:    ret
 ; CHECK-NEXT:    .loh AdrpLdr Lloh30, Lloh31
@@ -463,22 +463,21 @@ define i6 @no_combine_illegal_num_elements(<6 x i32> %vec) {
 ; CHECK-NEXT:    mov.s v0[1], w1
 ; CHECK-NEXT:    mov.s v1[1], w5
 ; CHECK-NEXT:    mov.s v0[2], w2
-; CHECK-NEXT:    cmeq.4s v1, v1, #0
+; CHECK-NEXT:    cmtst.4s v1, v1, v1
 ; CHECK-NEXT:    mov.s v0[3], w3
-; CHECK-NEXT:    cmeq.4s v0, v0, #0
-; CHECK-NEXT:    uzp1.8h v0, v0, v1
-; CHECK-NEXT:    mvn.16b v0, v0
-; CHECK-NEXT:    xtn.8b v0, v0
+; CHECK-NEXT:    xtn.4h v1, v1
+; CHECK-NEXT:    cmtst.4s v0, v0, v0
+; CHECK-NEXT:    xtn.4h v0, v0
 ; CHECK-NEXT:    umov.b w8, v0[0]
-; CHECK-NEXT:    umov.b w9, v0[1]
-; CHECK-NEXT:    umov.b w10, v0[2]
+; CHECK-NEXT:    umov.b w9, v0[2]
+; CHECK-NEXT:    umov.b w10, v0[4]
 ; CHECK-NEXT:    and w8, w8, #0x1
 ; CHECK-NEXT:    bfi w8, w9, #1, #1
-; CHECK-NEXT:    umov.b w9, v0[3]
+; CHECK-NEXT:    umov.b w9, v0[6]
 ; CHECK-NEXT:    bfi w8, w10, #2, #1
-; CHECK-NEXT:    umov.b w10, v0[4]
+; CHECK-NEXT:    umov.b w10, v1[0]
 ; CHECK-NEXT:    bfi w8, w9, #3, #1
-; CHECK-NEXT:    umov.b w9, v0[5]
+; CHECK-NEXT:    umov.b w9, v1[2]
 ; CHECK-NEXT:    bfi w8, w10, #4, #1
 ; CHECK-NEXT:    orr w8, w8, w9, lsl #5
 ; CHECK-NEXT:    and w0, w8, #0x3f

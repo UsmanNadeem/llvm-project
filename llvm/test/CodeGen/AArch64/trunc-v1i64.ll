@@ -15,8 +15,6 @@
 define <2 x i32> @test_v1i32_0(<1 x i64> %in0) {
 ; CHECK-LABEL: test_v1i32_0:
 ; CHECK:       // %bb.0:
-; CHECK-NEXT:    // kill: def $d0 killed $d0 def $q0
-; CHECK-NEXT:    xtn v0.2s, v0.2d
 ; CHECK-NEXT:    ret
   %1 = shufflevector <1 x i64> %in0, <1 x i64> undef, <2 x i32> <i32 0, i32 undef>
   %2 = trunc <2 x i64> %1 to <2 x i32>
@@ -27,7 +25,6 @@ define <2 x i32> @test_v1i32_1(<1 x i64> %in0) {
 ; CHECK-LABEL: test_v1i32_1:
 ; CHECK:       // %bb.0:
 ; CHECK-NEXT:    // kill: def $d0 killed $d0 def $q0
-; CHECK-NEXT:    xtn v0.2s, v0.2d
 ; CHECK-NEXT:    dup v0.2s, v0.s[0]
 ; CHECK-NEXT:    ret
   %1 = shufflevector <1 x i64> %in0, <1 x i64> undef, <2 x i32> <i32 undef, i32 0>

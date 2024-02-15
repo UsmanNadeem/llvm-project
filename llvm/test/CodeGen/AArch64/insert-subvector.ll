@@ -625,9 +625,9 @@ define <16 x i8> @load2multi2_v4i8(float %tmp, ptr %a, ptr %b) {
 ; CHECK-NEXT:    ldr s1, [x1]
 ; CHECK-NEXT:    ushll v0.8h, v0.8b, #0
 ; CHECK-NEXT:    ushll v1.8h, v1.8b, #0
-; CHECK-NEXT:    mov v1.d[1], v1.d[0]
-; CHECK-NEXT:    mov v0.d[1], v0.d[0]
-; CHECK-NEXT:    uzp1 v0.16b, v0.16b, v1.16b
+; CHECK-NEXT:    uzp1 v1.8b, v1.8b, v1.8b
+; CHECK-NEXT:    uzp1 v0.8b, v0.8b, v0.8b
+; CHECK-NEXT:    mov v0.d[1], v1.d[0]
 ; CHECK-NEXT:    ret
   %la = load <4 x i8>, ptr %a
   %lb = load <4 x i8>, ptr %b

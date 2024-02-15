@@ -13,10 +13,7 @@ target triple = "aarch64-unknown-linux-gnu"
 define <8 x i8> @concat_v8i8(<4 x i8> %op1, <4 x i8> %op2) vscale_range(2,0) #0 {
 ; CHECK-LABEL: concat_v8i8:
 ; CHECK:       // %bb.0:
-; CHECK-NEXT:    // kill: def $d0 killed $d0 def $q0
-; CHECK-NEXT:    // kill: def $d1 killed $d1 def $q1
-; CHECK-NEXT:    mov v0.d[1], v1.d[0]
-; CHECK-NEXT:    xtn v0.8b, v0.8h
+; CHECK-NEXT:    uzp1 v0.8b, v0.8b, v1.8b
 ; CHECK-NEXT:    ret
   %res = shufflevector <4 x i8> %op1, <4 x i8> %op2, <8 x i32> <i32 0, i32 1, i32 2, i32 3, i32 4, i32 5, i32 6, i32 7>
   ret <8 x i8> %res

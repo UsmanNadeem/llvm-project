@@ -19,10 +19,17 @@ define <8 x i16> @not_not_trunc_concat(<4 x i32> %x, <4 x i32> %y) {
 define <16 x i8> @not_not_trunc_concat_chain(<4 x i32> %a, <4 x i32> %b, <4 x i32> %x, <4 x i32> %y) {
 ; CHECK-LABEL: not_not_trunc_concat_chain:
 ; CHECK:       // %bb.0:
-; CHECK-NEXT:    uzp1 v2.8h, v2.8h, v3.8h
-; CHECK-NEXT:    uzp1 v0.8h, v0.8h, v1.8h
-; CHECK-NEXT:    uzp1 v0.16b, v0.16b, v2.16b
-; CHECK-NEXT:    mvn v0.16b, v0.16b
+; CHECK-NEXT:    xtn v0.4h, v0.4s
+; CHECK-NEXT:    xtn v1.4h, v1.4s
+; CHECK-NEXT:    xtn v2.4h, v2.4s
+; CHECK-NEXT:    xtn v3.4h, v3.4s
+; CHECK-NEXT:    mvn v0.8b, v0.8b
+; CHECK-NEXT:    mvn v1.8b, v1.8b
+; CHECK-NEXT:    mvn v2.8b, v2.8b
+; CHECK-NEXT:    mvn v3.8b, v3.8b
+; CHECK-NEXT:    uzp1 v0.8b, v0.8b, v1.8b
+; CHECK-NEXT:    uzp1 v1.8b, v2.8b, v3.8b
+; CHECK-NEXT:    mov v0.d[1], v1.d[0]
 ; CHECK-NEXT:    ret
   %nota = xor <4 x i32> %a, <i32 -1, i32 -1, i32 -1, i32 -1>
   %trna = trunc <4 x i32> %nota to <4 x i16>

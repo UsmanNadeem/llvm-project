@@ -645,51 +645,51 @@ define <16 x i32> @double2_bv_4xv4i8_i32(ptr %p, ptr %q, ptr %r, ptr %s, ptr %t,
 define <16 x i32> @extrause_load(ptr %p, ptr %q, ptr %r, ptr %s, ptr %z) {
 ; CHECK-LABEL: extrause_load:
 ; CHECK:       // %bb.0:
-; CHECK-NEXT:    ldr s1, [x0]
+; CHECK-NEXT:    ldr s0, [x0]
 ; CHECK-NEXT:    add x8, x3, #8
 ; CHECK-NEXT:    add x11, x3, #12
+; CHECK-NEXT:    ushll v0.8h, v0.8b, #0
+; CHECK-NEXT:    uzp1 v1.8b, v0.8b, v0.8b
 ; CHECK-NEXT:    str s1, [x4]
-; CHECK-NEXT:    ushll v1.8h, v1.8b, #0
-; CHECK-NEXT:    ldp s0, s4, [x2]
-; CHECK-NEXT:    ushll v2.8h, v0.8b, #0
+; CHECK-NEXT:    ldp s1, s5, [x2]
+; CHECK-NEXT:    ushll v2.8h, v1.8b, #0
 ; CHECK-NEXT:    umov w9, v2.h[0]
 ; CHECK-NEXT:    umov w10, v2.h[1]
-; CHECK-NEXT:    mov v0.b[8], w9
+; CHECK-NEXT:    mov v1.b[8], w9
 ; CHECK-NEXT:    umov w9, v2.h[2]
-; CHECK-NEXT:    mov v0.b[9], w10
+; CHECK-NEXT:    mov v1.b[9], w10
 ; CHECK-NEXT:    umov w10, v2.h[3]
 ; CHECK-NEXT:    ldr s2, [x1]
 ; CHECK-NEXT:    ushll v2.8h, v2.8b, #0
-; CHECK-NEXT:    mov v0.b[10], w9
+; CHECK-NEXT:    mov v1.b[10], w9
 ; CHECK-NEXT:    add x9, x1, #4
-; CHECK-NEXT:    mov v1.d[1], v2.d[0]
-; CHECK-NEXT:    mov v0.b[11], w10
+; CHECK-NEXT:    uzp1 v0.8b, v0.8b, v2.8b
+; CHECK-NEXT:    mov v1.b[11], w10
 ; CHECK-NEXT:    add x10, x1, #12
-; CHECK-NEXT:    bic v1.8h, #255, lsl #8
-; CHECK-NEXT:    ld1 { v0.s }[3], [x3], #4
-; CHECK-NEXT:    ldr s3, [x0, #12]
-; CHECK-NEXT:    ldp s2, s7, [x0, #4]
-; CHECK-NEXT:    ld1 { v4.s }[1], [x3]
-; CHECK-NEXT:    ldp s5, s6, [x2, #8]
-; CHECK-NEXT:    ld1 { v3.s }[1], [x10]
-; CHECK-NEXT:    ld1 { v2.s }[1], [x9]
-; CHECK-NEXT:    ld1 { v5.s }[1], [x8]
-; CHECK-NEXT:    ld1 { v6.s }[1], [x11]
+; CHECK-NEXT:    ld1 { v1.s }[3], [x3], #4
+; CHECK-NEXT:    ldr s4, [x0, #12]
+; CHECK-NEXT:    ldp s3, s16, [x0, #4]
+; CHECK-NEXT:    ld1 { v5.s }[1], [x3]
+; CHECK-NEXT:    ldp s6, s7, [x2, #8]
+; CHECK-NEXT:    ld1 { v4.s }[1], [x10]
+; CHECK-NEXT:    ld1 { v3.s }[1], [x9]
+; CHECK-NEXT:    ld1 { v6.s }[1], [x8]
+; CHECK-NEXT:    ld1 { v7.s }[1], [x11]
 ; CHECK-NEXT:    add x8, x1, #8
-; CHECK-NEXT:    ld1 { v7.s }[1], [x8]
-; CHECK-NEXT:    uaddl v2.8h, v2.8b, v3.8b
-; CHECK-NEXT:    ushll v3.8h, v5.8b, #0
-; CHECK-NEXT:    uaddl v4.8h, v4.8b, v6.8b
-; CHECK-NEXT:    uaddw v1.8h, v1.8h, v7.8b
-; CHECK-NEXT:    uaddw2 v5.8h, v3.8h, v0.16b
+; CHECK-NEXT:    ld1 { v16.s }[1], [x8]
+; CHECK-NEXT:    uaddl v2.8h, v3.8b, v4.8b
+; CHECK-NEXT:    ushll v3.8h, v6.8b, #0
+; CHECK-NEXT:    uaddl v4.8h, v5.8b, v7.8b
+; CHECK-NEXT:    uaddl v5.8h, v0.8b, v16.8b
+; CHECK-NEXT:    uaddw2 v6.8h, v3.8h, v1.16b
 ; CHECK-NEXT:    ushll v0.4s, v2.4h, #3
-; CHECK-NEXT:    ushll2 v2.4s, v2.8h, #3
-; CHECK-NEXT:    ushll v6.4s, v4.4h, #3
+; CHECK-NEXT:    ushll2 v1.4s, v2.8h, #3
+; CHECK-NEXT:    ushll v7.4s, v4.4h, #3
 ; CHECK-NEXT:    ushll2 v3.4s, v4.8h, #3
-; CHECK-NEXT:    uaddw v0.4s, v0.4s, v1.4h
-; CHECK-NEXT:    uaddw2 v1.4s, v2.4s, v1.8h
-; CHECK-NEXT:    uaddw2 v3.4s, v3.4s, v5.8h
-; CHECK-NEXT:    uaddw v2.4s, v6.4s, v5.4h
+; CHECK-NEXT:    uaddw v0.4s, v0.4s, v5.4h
+; CHECK-NEXT:    uaddw2 v1.4s, v1.4s, v5.8h
+; CHECK-NEXT:    uaddw2 v3.4s, v3.4s, v6.8h
+; CHECK-NEXT:    uaddw v2.4s, v7.4s, v6.4h
 ; CHECK-NEXT:    ret
   %lp1 = load <4 x i8>, ptr %p
   store <4 x i8> %lp1, ptr %z
