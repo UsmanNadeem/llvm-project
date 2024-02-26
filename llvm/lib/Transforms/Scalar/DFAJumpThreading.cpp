@@ -65,6 +65,7 @@
 #include "llvm/Analysis/AssumptionCache.h"
 #include "llvm/Analysis/CodeMetrics.h"
 #include "llvm/Analysis/DomTreeUpdater.h"
+#include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/OptimizationRemarkEmitter.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
 #include "llvm/IR/CFG.h"
@@ -131,9 +132,9 @@ void unfold(DomTreeUpdater *DTU, SelectInstToUnfold SIToUnfold,
 
 class DFAJumpThreading {
 public:
-  DFAJumpThreading(AssumptionCache *AC, DominatorTree *DT,
+  DFAJumpThreading(AssumptionCache *AC, DominatorTree *DT, LoopInfo *LI,
                    TargetTransformInfo *TTI, OptimizationRemarkEmitter *ORE)
-      : AC(AC), DT(DT), TTI(TTI), ORE(ORE) {}
+      : AC(AC), DT(DT), LI(LI), TTI(TTI), ORE(ORE) {}
 
   bool run(Function &F);
 
@@ -161,6 +162,7 @@ private:
 
   AssumptionCache *AC;
   DominatorTree *DT;
+  LoopInfo *LI;
   TargetTransformInfo *TTI;
   OptimizationRemarkEmitter *ORE;
 };
@@ -378,7 +380,8 @@ inline raw_ostream &operator<<(raw_ostream &OS, const ThreadingPath &TPath) {
 #endif
 
 struct MainSwitch {
-  MainSwitch(SwitchInst *SI, OptimizationRemarkEmitter *ORE) {
+  MainSwitch(SwitchInst *SI, LoopInfo *LI, OptimizationRemarkEmitter *ORE)
+      : LI(LI) {
     if (isCandidate(SI)) {
       Instr = SI;
     } else {
@@ -435,6 +438,11 @@ private:
         continue;
       } else {
         LLVM_DEBUG(dbgs() << "\tother: " << *Current << "\n");
+        // Early exit for unpredictable values that are obviously defined in the
+        // same loop.
+        if (auto *I = dyn_cast<Instruction>(Current))
+          if (LI->getLoopFor(I->getParent()) == LI->getLoopFor(SI->getParent()))
+            return false;
         // Allow unpredictable values. The hope is that those will be the
         // initial switch values that can be ignored (they will hit the
         // unthreaded switch) but this assumption will get checked later after
@@ -488,6 +496,7 @@ private:
     return true;
   }
 
+  LoopInfo *LI;
   SwitchInst *Instr = nullptr;
   SmallVector<SelectInstToUnfold, 4> SelectInsts;
 };
@@ -1262,7 +1271,7 @@ bool DFAJumpThreading::run(Function &F) {
 
     LLVM_DEBUG(dbgs() << "\nCheck if SwitchInst in BB " << BB.getName()
                       << " is a candidate\n");
-    MainSwitch Switch(SI, ORE);
+    MainSwitch Switch(SI, LI, ORE);
 
     if (!Switch.getInstr())
       continue;
@@ -1315,10 +1324,11 @@ PreservedAnalyses DFAJumpThreadingPass::run(Function &F,
                                             FunctionAnalysisManager &AM) {
   AssumptionCache &AC = AM.getResult<AssumptionAnalysis>(F);
   DominatorTree &DT = AM.getResult<DominatorTreeAnalysis>(F);
+  LoopInfo &LI = AM.getResult<LoopAnalysis>(F);
   TargetTransformInfo &TTI = AM.getResult<TargetIRAnalysis>(F);
   OptimizationRemarkEmitter ORE(&F);
 
-  if (!DFAJumpThreading(&AC, &DT, &TTI, &ORE).run(F))
+  if (!DFAJumpThreading(&AC, &DT, &LI, &TTI, &ORE).run(F))
     return PreservedAnalyses::all();
 
   PreservedAnalyses PA;
