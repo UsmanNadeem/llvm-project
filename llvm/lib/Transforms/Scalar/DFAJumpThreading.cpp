@@ -63,6 +63,7 @@
 #include "llvm/ADT/SmallSet.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/Analysis/AssumptionCache.h"
+#include "llvm/Analysis/CFG.h"
 #include "llvm/Analysis/CodeMetrics.h"
 #include "llvm/Analysis/DomTreeUpdater.h"
 #include "llvm/Analysis/LoopInfo.h"
@@ -95,7 +96,10 @@ static cl::opt<bool>
     ClViewCfgBefore("dfa-jump-view-cfg-before",
                     cl::desc("View the CFG before DFA Jump Threading"),
                     cl::Hidden, cl::init(false));
-
+static cl::opt<bool> DOLI("doli", cl::desc("Early exit"), cl::Hidden,
+                          cl::init(true));
+static cl::opt<bool> PRINTPATHS("dfa-print-paths", cl::desc("print-paths"),
+                                cl::Hidden, cl::init(false));
 static cl::opt<unsigned> MaxPathLength(
     "dfa-max-path-length",
     cl::desc("Max number of blocks searched to find a threading path"),
@@ -380,8 +384,9 @@ inline raw_ostream &operator<<(raw_ostream &OS, const ThreadingPath &TPath) {
 #endif
 
 struct MainSwitch {
-  MainSwitch(SwitchInst *SI, LoopInfo *LI, OptimizationRemarkEmitter *ORE)
-      : LI(LI) {
+  MainSwitch(SwitchInst *SI, DominatorTree *DT, LoopInfo *LI,
+             OptimizationRemarkEmitter *ORE)
+      : DT(DT), LI(LI) {
     if (isCandidate(SI)) {
       Instr = SI;
     } else {
@@ -405,7 +410,7 @@ private:
   ///
   /// Also, collect select instructions to unfold.
   bool isCandidate(const SwitchInst *SI) {
-    std::deque<Value *> Q;
+    std::deque<std::pair<Value *, BasicBlock *>> Q;
     SmallSet<Value *, 16> SeenValues;
     SelectInsts.clear();
 
@@ -414,22 +419,25 @@ private:
     if (!isa<PHINode>(SICond))
       return false;
 
-    addToQueue(SICond, Q, SeenValues);
+    addToQueue(SICond, nullptr, Q, SeenValues);
 
     while (!Q.empty()) {
-      Value *Current = Q.front();
+      Value *Current = Q.front().first;
+      BasicBlock *CurrentIncomingBB = Q.front().second;
       Q.pop_front();
 
       if (auto *Phi = dyn_cast<PHINode>(Current)) {
-        for (Value *Incoming : Phi->incoming_values()) {
-          addToQueue(Incoming, Q, SeenValues);
+        // for (Value *Incoming : Phi->incoming_values()) {
+        for (BasicBlock *IncomingBB : Phi->blocks()) {
+          Value *Incoming = Phi->getIncomingValueForBlock(IncomingBB);
+          addToQueue(Incoming, IncomingBB, Q, SeenValues);
         }
         LLVM_DEBUG(dbgs() << "\tphi: " << *Phi << "\n");
       } else if (SelectInst *SelI = dyn_cast<SelectInst>(Current)) {
         if (!isValidSelectInst(SelI))
           return false;
-        addToQueue(SelI->getTrueValue(), Q, SeenValues);
-        addToQueue(SelI->getFalseValue(), Q, SeenValues);
+        addToQueue(SelI->getTrueValue(), CurrentIncomingBB, Q, SeenValues);
+        addToQueue(SelI->getFalseValue(), CurrentIncomingBB, Q, SeenValues);
         LLVM_DEBUG(dbgs() << "\tselect: " << *SelI << "\n");
         if (auto *SelIUse = dyn_cast<PHINode>(SelI->user_back()))
           SelectInsts.push_back(SelectInstToUnfold(SelI, SelIUse));
@@ -438,11 +446,48 @@ private:
         continue;
       } else {
         LLVM_DEBUG(dbgs() << "\tother: " << *Current << "\n");
+        // Check if the value is seen in the path from the switch to loop
+        // header.
+        if (Loop *L = LI->getLoopFor(SI->getParent())) {
+          SmallPtrSet<BasicBlock *, 1> ExclusionSet;
+          if (L->getHeader() != SI->getParent())
+            ExclusionSet.insert(L->getHeader());
+          if (isPotentiallyReachable(
+                  /*From*/ SI->getParent(), CurrentIncomingBB, &ExclusionSet,
+                  DT, LI)) {
+            LLVM_DEBUG(dbgs() << "Other is reachable, can terminate!\n");
+            if (DOLI)
+              return false;
+          }
+        }
+
         // Early exit for unpredictable values that are obviously defined in the
         // same loop.
-        if (auto *I = dyn_cast<Instruction>(Current))
-          if (LI->getLoopFor(I->getParent()) == LI->getLoopFor(SI->getParent()))
-            return false;
+        // if (auto *I = dyn_cast<Instruction>(Current)) {
+        //   LLVM_DEBUG(dbgs()
+        //              << "Other BB: " << I->getParent()->getName() << "\n");
+        //   if (LI->getLoopFor(I->getParent())) {
+        //     LLVM_DEBUG(dbgs()
+        //                << "Other LOOP: "
+        //                << LI->getLoopFor(I->getParent())->getName() << "\n");
+        //   } else {
+        //     LLVM_DEBUG(dbgs() << "Other LOOP NULL\n");
+        //   }
+        //   if (LI->getLoopFor(SI->getParent())) {
+        //     LLVM_DEBUG(dbgs()
+        //                << "SI LOOP: "
+        //                << LI->getLoopFor(SI->getParent())->getName() <<
+        //                "\n");
+        //   } else {
+        //     LLVM_DEBUG(dbgs() << "SI LOOP NULL\n");
+        //   }
+
+        //   if (LI->getLoopFor(I->getParent()) ==
+        //       LI->getLoopFor(SI->getParent())) {
+        //     if (DOLI)
+        //       return false;
+        //   }
+        // }
         // Allow unpredictable values. The hope is that those will be the
         // initial switch values that can be ignored (they will hit the
         // unthreaded switch) but this assumption will get checked later after
@@ -454,11 +499,12 @@ private:
     return true;
   }
 
-  void addToQueue(Value *Val, std::deque<Value *> &Q,
+  void addToQueue(Value *Val, BasicBlock *BB,
+                  std::deque<std::pair<Value *, BasicBlock *>> &Q,
                   SmallSet<Value *, 16> &SeenValues) {
     if (SeenValues.contains(Val))
       return;
-    Q.push_back(Val);
+    Q.push_back({Val, BB});
     SeenValues.insert(Val);
   }
 
@@ -496,6 +542,7 @@ private:
     return true;
   }
 
+  DominatorTree *DT;
   LoopInfo *LI;
   SwitchInst *Instr = nullptr;
   SmallVector<SelectInstToUnfold, 4> SelectInsts;
@@ -514,6 +561,17 @@ struct AllSwitchPaths {
   void run() {
     VisitedBlocks Visited;
     PathsType LoopPaths = paths(SwitchBlock, Visited, /* PathDepth = */ 1);
+
+    LLVM_DEBUG(if (PRINTPATHS) {
+      dbgs() << LoopPaths.size() << " LoopPaths:\n";
+      for (std::deque<BasicBlock *> &DQ : LoopPaths) {
+        for (BasicBlock *BB : DQ) {
+          dbgs() << BB->getName().str() << "\t";
+        }
+        dbgs() << " PathLen: " << DQ.size() << "\n";
+      }
+    });
+
     StateDefMap StateDef = getStateDefMap(LoopPaths);
 
     if (StateDef.empty()) {
@@ -599,6 +657,12 @@ private:
         NewPath.push_front(BB);
         Res.push_back(NewPath);
         if (Res.size() >= MaxNumPaths) {
+          ORE->emit([&]() {
+            return OptimizationRemarkAnalysis(DEBUG_TYPE,
+                                              "MaxPathLengthReached", Switch)
+                   << "Exploration stopped after visiting MaxNumPaths="
+                   << ore::NV("MaxNumPaths", MaxNumPaths) << " blocks.";
+          });
           return Res;
         }
       }
@@ -646,6 +710,11 @@ private:
           continue;
         }
 
+        if (!isa<PHINode>(Incoming)) {
+          LLVM_DEBUG(dbgs() << "Incoming: " << *Incoming << "\n");
+          LLVM_DEBUG(dbgs() << "IncomingBB: " << IncomingBB->getName() << "\n");
+          // continue;
+        }
         // Any unpredictable value inside the loops means we must bail out.
         if (!isa<PHINode>(Incoming))
           return StateDefMap();
@@ -1271,7 +1340,7 @@ bool DFAJumpThreading::run(Function &F) {
 
     LLVM_DEBUG(dbgs() << "\nCheck if SwitchInst in BB " << BB.getName()
                       << " is a candidate\n");
-    MainSwitch Switch(SI, LI, ORE);
+    MainSwitch Switch(SI, DT, LI, ORE);
 
     if (!Switch.getInstr())
       continue;
