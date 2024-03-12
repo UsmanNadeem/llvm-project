@@ -448,17 +448,35 @@ private:
         LLVM_DEBUG(dbgs() << "\tother: " << *Current << "\n");
         // Check if the value is seen in the path from the switch to loop
         // header.
-        if (Loop *L = LI->getLoopFor(SI->getParent())) {
-          SmallPtrSet<BasicBlock *, 1> ExclusionSet;
-          if (L->getHeader() != SI->getParent())
-            ExclusionSet.insert(L->getHeader());
-          if (isPotentiallyReachable(
-                  /*From*/ SI->getParent(), CurrentIncomingBB, &ExclusionSet,
-                  DT, LI)) {
-            LLVM_DEBUG(dbgs() << "Other is reachable, can terminate!\n");
-            if (DOLI)
-              return false;
-          }
+        // if (Loop *L = LI->getLoopFor(SI->getParent())) {
+        //   SmallPtrSet<BasicBlock *, 1> ExclusionSet;
+        //   if (L->getHeader() != SI->getParent())
+        //     ExclusionSet.insert(L->getHeader());
+        //   if (isPotentiallyReachable(
+        //           /*From*/ SI->getParent(), CurrentIncomingBB, &ExclusionSet,
+        //           DT, LI)) {
+        //     LLVM_DEBUG(dbgs() << "Other is reachable, can terminate!\n");
+        //     if (DOLI)
+        //       return false;
+        //   }
+        // }
+
+
+        // LLVM_DEBUG(dbgs() << "\tchecking if BB: " << SI->getParent()->getName()
+        //   << " dominates " << CurrentIncomingBB->getName()
+        //   << "\n");
+        // if (DT->dominates(SI->getParent(), CurrentIncomingBB)) {
+        //   LLVM_DEBUG(dbgs() << "\tdominates\n");
+        //   return false;
+        // } else {
+        //   LLVM_DEBUG(dbgs() << "\tdoes not dominate\n");
+        // }
+
+
+        if (LI->getLoopFor(SI->getParent()) == LI->getLoopFor(CurrentIncomingBB)) {
+          LLVM_DEBUG(dbgs() << "\tother comes from same inner loop\n");
+          if (DOLI)
+            return false;
         }
 
         // Early exit for unpredictable values that are obviously defined in the
