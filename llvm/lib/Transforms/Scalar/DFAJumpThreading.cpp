@@ -541,7 +541,12 @@ struct AllSwitchPaths {
 
   void run() {
     VisitedBlocks Visited;
-    PathsType LoopPaths = paths(SwitchBlock, Visited, /* PathDepth = */ 1);
+    const Loop *OuterSwitchLoop =
+        LI->getLoopFor(SwitchBlock)->getOutermostLoop();
+    // Set of BBs in a nested loop CFG that dont come back to the Switch.
+    SmallPtrSet<const BasicBlock *, 16> PruneSet;
+    PathsType LoopPaths = paths(SwitchBlock, Visited, /* PathDepth = */ 1,
+                                PruneSet, OuterSwitchLoop);
     StateDefMap StateDef = getStateDefMap(LoopPaths);
 
     if (StateDef.empty()) {
@@ -587,8 +592,9 @@ private:
   // Key: the parent basic block of that instruction.
   typedef DenseMap<const BasicBlock *, const PHINode *> StateDefMap;
 
-  PathsType paths(BasicBlock *BB, VisitedBlocks &Visited,
-                  unsigned PathDepth) const {
+  PathsType paths(BasicBlock *BB, VisitedBlocks &Visited, unsigned PathDepth,
+                  SmallPtrSetImpl<const BasicBlock *> &PruneSet,
+                  const Loop *OuterSwitchLoop) const {
     PathsType Res;
 
     // Stop exploring paths after visiting MaxPathLength blocks
@@ -606,8 +612,7 @@ private:
 
     // Stop if we have reached the BB out of loop, since its successors have no
     // impact on the DFA.
-    // TODO: Do we need to stop exploring if BB is the outer loop of the switch?
-    if (!LI->getLoopFor(BB))
+    if (!OuterSwitchLoop->contains(BB))
       return Res;
 
     // Some blocks have multiple edges to the same successor, and this set
@@ -626,8 +631,24 @@ private:
       // We have encountered a cycle, do not get caught in it
       if (Visited.contains(Succ))
         continue;
+      // Don't do recursion on this node if we know that it does not eventually
+      // reach the switch.
+      if (PruneSet.contains(Succ))
+        continue;
 
-      PathsType SuccPaths = paths(Succ, Visited, PathDepth + 1);
+      PathsType SuccPaths =
+          paths(Succ, Visited, PathDepth + 1, PruneSet, OuterSwitchLoop);
+      // We have either reached an exit block i.e. Succ does not reach the
+      // switch, in which case we can prune the resulting tree. Or, exhausted
+      // our MaxPathLength limit, in which case we might still be able to reach
+      // the switch through a different predecessor with a shorter path. In this
+      // case we still prune the tree, unless if the Succ block is in the same
+      // inner loop as the switch. This way we still do space pruning, but don't
+      // over-restrict our search.
+      if (SuccPaths.empty() && !LI->getLoopFor(SwitchBlock)->contains(Succ)) {
+        PruneSet.insert(Succ);
+        continue;
+      }
       for (const PathType &Path : SuccPaths) {
         PathType NewPath(Path);
         NewPath.push_front(BB);
