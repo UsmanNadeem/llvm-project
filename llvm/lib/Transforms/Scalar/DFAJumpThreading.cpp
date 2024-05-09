@@ -645,7 +645,7 @@ private:
       // case we still prune the tree, unless if the Succ block is in the same
       // inner loop as the switch. This way we still do space pruning, but don't
       // over-restrict our search.
-      if (SuccPaths.empty() && !LI->getLoopFor(SwitchBlock)->contains(Succ)) {
+      if (SuccPaths.empty() /*&& !LI->getLoopFor(SwitchBlock)->contains(Succ)*/) {
         PruneSet.insert(Succ);
         continue;
       }
