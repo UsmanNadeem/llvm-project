@@ -6,11 +6,10 @@
 ; state, and the block that determines the next state.
 ; < path of BBs that form a cycle > [ state, determinator ]
 define i32 @test1(i32 %num) {
-; CHECK-LABEL: DFA Jump threading: test1
-; CHECK-DAG: < for.body for.inc > [ 1, for.inc ]
-; CHECK-DAG: < for.body case1 for.inc > [ 2, for.inc ]
-; CHECK-DAG: < for.body case2 for.inc > [ 1, for.inc ]
-; CHECK-DAG: < for.body case2 si.unfold.false for.inc > [ 2, for.inc ]
+; CHECK: < for.body for.inc > [ 1, for.inc ]
+; CHECK-NEXT: < for.body case1 for.inc > [ 2, for.inc ]
+; CHECK-NEXT: < for.body case2 for.inc > [ 1, for.inc ]
+; CHECK-NEXT: < for.body case2 si.unfold.false for.inc > [ 2, for.inc ]
 entry:
   br label %for.body
 
@@ -44,17 +43,16 @@ for.end:
 ; complicated CFG. Here the FSM is represented as a nested loop, with
 ; fallthrough cases.
 define i32 @test2(i32 %init) {
-; CHECK-LABEL: DFA Jump threading: test2
-; CHECK-DAG: < loop.3 case2 > [ 3, loop.3 ]
-; CHECK-DAG: < loop.3 case2 loop.1.backedge loop.1 loop.2 > [ 1, loop.1 ]
-; CHECK-DAG: < loop.3 case2 loop.1.backedge si.unfold.false loop.1 loop.2 > [ 4, loop.1.backedge ]
-; CHECK-DAG: < loop.3 case3 loop.2.backedge loop.2 > [ 0, loop.2.backedge ]
-; CHECK-DAG: < loop.3 case3 case4 loop.2.backedge loop.2 > [ 3, loop.2.backedge ]
-; CHECK-DAG: < loop.3 case3 case4 loop.1.backedge loop.1 loop.2 > [ 1, loop.1 ]
-; CHECK-DAG: < loop.3 case3 case4 loop.1.backedge si.unfold.false loop.1 loop.2 > [ 2, loop.1.backedge ]
-; CHECK-DAG: < loop.3 case4 loop.2.backedge loop.2 > [ 3, loop.2.backedge ]
-; CHECK-DAG: < loop.3 case4 loop.1.backedge loop.1 loop.2 > [ 1, loop.1 ]
-; CHECK-DAG: < loop.3 case4 loop.1.backedge si.unfold.false loop.1 loop.2 > [ 2, loop.1.backedge ]
+; CHECK: < loop.3 case2 > [ 3, loop.3 ]
+; CHECK-NEXT: < loop.3 case2 loop.1.backedge loop.1 loop.2 > [ 1, loop.1 ]
+; CHECK-NEXT: < loop.3 case2 loop.1.backedge si.unfold.false loop.1 loop.2 > [ 4, loop.1.backedge ]
+; CHECK-NEXT: < loop.3 case3 loop.2.backedge loop.2 > [ 0, loop.2.backedge ]
+; CHECK-NEXT: < loop.3 case3 case4 loop.2.backedge loop.2 > [ 3, loop.2.backedge ]
+; CHECK-NEXT: < loop.3 case3 case4 loop.1.backedge loop.1 loop.2 > [ 1, loop.1 ]
+; CHECK-NEXT: < loop.3 case3 case4 loop.1.backedge si.unfold.false loop.1 loop.2 > [ 2, loop.1.backedge ]
+; CHECK-NEXT: < loop.3 case4 loop.2.backedge loop.2 > [ 3, loop.2.backedge ]
+; CHECK-NEXT: < loop.3 case4 loop.1.backedge loop.1 loop.2 > [ 1, loop.1 ]
+; CHECK-NEXT: < loop.3 case4 loop.1.backedge si.unfold.false loop.1 loop.2 > [ 2, loop.1.backedge ]
 entry:
   %cmp = icmp eq i32 %init, 0
   %sel = select i1 %cmp, i32 0, i32 2
@@ -189,17 +187,16 @@ bb66:                                             ; preds = %bb59
 
 ; Value %init is not predictable but it's okay since it is the value initial to the switch.
 define i32 @initial.value.positive1(i32 %init) {
-; CHECK-LABEL: DFA Jump threading: initial.value.positive1
-; CHECK-DAG: < loop.3 case2 > [ 3, loop.3 ]
-; CHECK-DAG: < loop.3 case2 loop.1.backedge loop.1 loop.2 > [ 1, loop.1 ]
-; CHECK-DAG: < loop.3 case2 loop.1.backedge si.unfold.false loop.1 loop.2 > [ 4, loop.1.backedge ]
-; CHECK-DAG: < loop.3 case3 loop.2.backedge loop.2 > [ 0, loop.2.backedge ]
-; CHECK-DAG: < loop.3 case3 case4 loop.2.backedge loop.2 > [ 3, loop.2.backedge ]
-; CHECK-DAG: < loop.3 case3 case4 loop.1.backedge loop.1 loop.2 > [ 1, loop.1 ]
-; CHECK-DAG: < loop.3 case3 case4 loop.1.backedge si.unfold.false loop.1 loop.2 > [ 2, loop.1.backedge ]
-; CHECK-DAG: < loop.3 case4 loop.2.backedge loop.2 > [ 3, loop.2.backedge ]
-; CHECK-DAG: < loop.3 case4 loop.1.backedge loop.1 loop.2 > [ 1, loop.1 ]
-; CHECK-DAG: < loop.3 case4 loop.1.backedge si.unfold.false loop.1 loop.2 > [ 2, loop.1.backedge ]
+; CHECK: < loop.3 case2 > [ 3, loop.3 ]
+; CHECK-NEXT: < loop.3 case2 loop.1.backedge loop.1 loop.2 > [ 1, loop.1 ]
+; CHECK-NEXT: < loop.3 case2 loop.1.backedge si.unfold.false loop.1 loop.2 > [ 4, loop.1.backedge ]
+; CHECK-NEXT: < loop.3 case3 loop.2.backedge loop.2 > [ 0, loop.2.backedge ]
+; CHECK-NEXT: < loop.3 case3 case4 loop.2.backedge loop.2 > [ 3, loop.2.backedge ]
+; CHECK-NEXT: < loop.3 case3 case4 loop.1.backedge loop.1 loop.2 > [ 1, loop.1 ]
+; CHECK-NEXT: < loop.3 case3 case4 loop.1.backedge si.unfold.false loop.1 loop.2 > [ 2, loop.1.backedge ]
+; CHECK-NEXT: < loop.3 case4 loop.2.backedge loop.2 > [ 3, loop.2.backedge ]
+; CHECK-NEXT: < loop.3 case4 loop.1.backedge loop.1 loop.2 > [ 1, loop.1 ]
+; CHECK-NEXT: < loop.3 case4 loop.1.backedge si.unfold.false loop.1 loop.2 > [ 2, loop.1.backedge ]
 entry:
   %cmp = icmp eq i32 %init, 0
   br label %loop.1
