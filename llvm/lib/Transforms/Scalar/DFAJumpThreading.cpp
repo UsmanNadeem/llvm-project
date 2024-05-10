@@ -541,8 +541,9 @@ struct AllSwitchPaths {
 
   void run() {
     VisitedBlocks Visited;
-    PathsType LoopPaths = paths(SwitchBlock, Visited, /* PathDepth = */ 1);
-    StateDefMap StateDef = getStateDefMap(LoopPaths);
+    paths(SwitchBlock, Visited, LI->getLoopFor(SwitchBlock)->getOutermostLoop(),
+          /* PathDepth = */ 1);
+    StateDefMap StateDef = getStateDefMap(SubPaths[SwitchBlock]);
 
     if (StateDef.empty()) {
       ORE->emit([&]() {
@@ -553,7 +554,7 @@ struct AllSwitchPaths {
       return;
     }
 
-    for (const PathType &Path : LoopPaths) {
+    for (const PathType &Path : SubPaths[SwitchBlock]) {
       ThreadingPath TPath;
 
       const BasicBlock *PrevBB = Path.back();
@@ -587,10 +588,9 @@ private:
   // Key: the parent basic block of that instruction.
   typedef DenseMap<const BasicBlock *, const PHINode *> StateDefMap;
 
-  PathsType paths(BasicBlock *BB, VisitedBlocks &Visited,
-                  unsigned PathDepth) const {
-    PathsType Res;
-
+  DenseMap<const BasicBlock *, PathsType> SubPaths;
+  void paths(BasicBlock *BB, VisitedBlocks &Visited,
+             const Loop *SwitchOuterLoop, unsigned PathDepth) {
     // Stop exploring paths after visiting MaxPathLength blocks
     if (PathDepth > MaxPathLength) {
       ORE->emit([&]() {
@@ -599,49 +599,42 @@ private:
                << "Exploration stopped after visiting MaxPathLength="
                << ore::NV("MaxPathLength", MaxPathLength) << " blocks.";
       });
-      return Res;
+      return;
     }
 
     Visited.insert(BB);
 
     // Stop if we have reached the BB out of loop, since its successors have no
     // impact on the DFA.
-    // TODO: Do we need to stop exploring if BB is the outer loop of the switch?
-    if (!LI->getLoopFor(BB))
-      return Res;
+    if (!SwitchOuterLoop->contains(BB))
+      return;
 
     // Some blocks have multiple edges to the same successor, and this set
     // is used to prevent a duplicate path from being generated
     SmallSet<BasicBlock *, 4> Successors;
     for (BasicBlock *Succ : successors(BB)) {
-      if (!Successors.insert(Succ).second)
+      if (!Successors.insert(Succ).second || Succ == BB)
         continue;
 
       // Found a cycle through the SwitchBlock
-      if (Succ == SwitchBlock) {
-        Res.push_back({BB});
+      if (Succ == SwitchBlock && !SubPaths.contains(BB)) {
+        SubPaths[BB].push_back({BB});
         continue;
       }
 
       // We have encountered a cycle, do not get caught in it
-      if (Visited.contains(Succ))
+      if (!Visited.contains(Succ))
+        paths(Succ, Visited, SwitchOuterLoop, PathDepth + 1);
+      if (!SubPaths.contains(Succ))
         continue;
-
-      PathsType SuccPaths = paths(Succ, Visited, PathDepth + 1);
-      for (const PathType &Path : SuccPaths) {
+      for (const PathType &Path : SubPaths[Succ]) {
         PathType NewPath(Path);
         NewPath.push_front(BB);
-        Res.push_back(NewPath);
-        if (Res.size() >= MaxNumPaths) {
-          return Res;
-        }
+        SubPaths[BB].push_back(move(NewPath));
+        if (SubPaths[BB].size() >= MaxNumPaths)
+          return;
       }
     }
-    // This block could now be visited again from a different predecessor. Note
-    // that this will result in exponential runtime. Subpaths could possibly be
-    // cached but it takes a lot of memory to store them.
-    Visited.erase(BB);
-    return Res;
   }
 
   /// Walk the use-def chain and collect all the state-defining instructions.
