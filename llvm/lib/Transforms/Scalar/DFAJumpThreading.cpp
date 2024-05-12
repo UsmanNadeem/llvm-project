@@ -592,15 +592,15 @@ private:
   void paths(BasicBlock *BB, VisitedBlocks &Visited,
              const Loop *SwitchOuterLoop, unsigned PathDepth) {
     // Stop exploring paths after visiting MaxPathLength blocks
-    if (PathDepth > MaxPathLength) {
-      ORE->emit([&]() {
-        return OptimizationRemarkAnalysis(DEBUG_TYPE, "MaxPathLengthReached",
-                                          Switch)
-               << "Exploration stopped after visiting MaxPathLength="
-               << ore::NV("MaxPathLength", MaxPathLength) << " blocks.";
-      });
-      return;
-    }
+    // if (PathDepth > MaxPathLength) {
+    //   ORE->emit([&]() {
+    //     return OptimizationRemarkAnalysis(DEBUG_TYPE, "MaxPathLengthReached",
+    //                                       Switch)
+    //            << "Exploration stopped after visiting MaxPathLength="
+    //            << ore::NV("MaxPathLength", MaxPathLength) << " blocks.";
+    //   });
+    //   return;
+    // }
 
     Visited.insert(BB);
 
@@ -628,6 +628,8 @@ private:
       if (!SubPaths.contains(Succ))
         continue;
       for (const PathType &Path : SubPaths[Succ]) {
+        if ((Path.size()+1) > MaxPathLength)
+          continue;
         PathType NewPath(Path);
         NewPath.push_front(BB);
         SubPaths[BB].push_back(move(NewPath));
