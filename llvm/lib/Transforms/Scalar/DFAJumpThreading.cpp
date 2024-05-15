@@ -125,15 +125,15 @@ class SelectInstToUnfold {
 public:
   SelectInstToUnfold(SelectInst *SI, PHINode *SIUse) : SI(SI), SIUse(SIUse) {}
 
-  SelectInst *getInst() { return SI; }
-  PHINode *getUse() { return SIUse; }
+  SelectInst *getInst() const { return SI; }
+  PHINode *getUse() const { return SIUse; }
 
   explicit operator bool() const { return SI && SIUse; }
 };
 
-void unfold(DomTreeUpdater *DTU, LoopInfo *LI, SelectInstToUnfold SIToUnfold,
-            std::vector<SelectInstToUnfold> *NewSIsToUnfold,
-            std::vector<BasicBlock *> *NewBBs);
+void unfold(DomTreeUpdater *DTU, LoopInfo *LI,
+            const SelectInstToUnfold &SIToUnfold,
+            SmallVectorImpl<SelectInstToUnfold> &NewSIsToUnfold);
 
 class DFAJumpThreading {
 public:
@@ -149,20 +149,13 @@ private:
   unfoldSelectInstrs(DominatorTree *DT,
                      const SmallVector<SelectInstToUnfold, 4> &SelectInsts) {
     DomTreeUpdater DTU(DT, DomTreeUpdater::UpdateStrategy::Eager);
-    SmallVector<SelectInstToUnfold, 4> Stack;
-    for (SelectInstToUnfold SIToUnfold : SelectInsts)
-      Stack.push_back(SIToUnfold);
+    SmallVector<SelectInstToUnfold, 4> Stack(SelectInsts);
 
     while (!Stack.empty()) {
       SelectInstToUnfold SIToUnfold = Stack.pop_back_val();
 
-      std::vector<SelectInstToUnfold> NewSIsToUnfold;
-      std::vector<BasicBlock *> NewBBs;
-      unfold(&DTU, LI, SIToUnfold, &NewSIsToUnfold, &NewBBs);
-
-      // Put newly discovered select instructions into the work list.
-      for (const SelectInstToUnfold &NewSIToUnfold : NewSIsToUnfold)
-        Stack.push_back(NewSIToUnfold);
+      // Unfold and put newly discovered select instructions into the work list.
+      unfold(&DTU, LI, SIToUnfold, Stack);
     }
   }
 
@@ -181,36 +174,35 @@ namespace {
 void createBasicBlockAndSinkSelectInst(
     DomTreeUpdater *DTU, SelectInst *SI, PHINode *SIUse, SelectInst *SIToSink,
     BasicBlock *EndBlock, StringRef NewBBName, BasicBlock **NewBlock,
-    BranchInst **NewBranch, std::vector<SelectInstToUnfold> *NewSIsToUnfold,
-    std::vector<BasicBlock *> *NewBBs) {
+    BranchInst **NewBranch,
+    SmallVectorImpl<SelectInstToUnfold> &NewSIsToUnfold) {
   assert(SIToSink->hasOneUse());
   assert(NewBlock);
   assert(NewBranch);
   *NewBlock = BasicBlock::Create(SI->getContext(), NewBBName,
                                  EndBlock->getParent(), EndBlock);
-  NewBBs->push_back(*NewBlock);
   *NewBranch = BranchInst::Create(EndBlock, *NewBlock);
   SIToSink->moveBefore(*NewBranch);
-  NewSIsToUnfold->push_back(SelectInstToUnfold(SIToSink, SIUse));
+  NewSIsToUnfold.emplace_back(SIToSink, SIUse);
   DTU->applyUpdates({{DominatorTree::Insert, *NewBlock, EndBlock}});
 }
 
 /// Unfold the select instruction held in \p SIToUnfold by replacing it with
 /// control flow.
 ///
-/// Put newly discovered select instructions into \p NewSIsToUnfold. Put newly
-/// created basic blocks into \p NewBBs.
+/// Put newly discovered select instructions into \p NewSIsToUnfold.
 ///
 /// TODO: merge it with CodeGenPrepare::optimizeSelectInst() if possible.
-void unfold(DomTreeUpdater *DTU, LoopInfo *LI, SelectInstToUnfold SIToUnfold,
-            std::vector<SelectInstToUnfold> *NewSIsToUnfold,
-            std::vector<BasicBlock *> *NewBBs) {
+void unfold(DomTreeUpdater *DTU, LoopInfo *LI,
+            const SelectInstToUnfold &SIToUnfold,
+            SmallVectorImpl<SelectInstToUnfold> &NewSIsToUnfold) {
   SelectInst *SI = SIToUnfold.getInst();
   PHINode *SIUse = SIToUnfold.getUse();
   BasicBlock *StartBlock = SI->getParent();
   BasicBlock *EndBlock = SIUse->getParent();
   BranchInst *StartBlockTerm =
       dyn_cast<BranchInst>(StartBlock->getTerminator());
+  SmallPtrSet<BasicBlock *, 2> NewBBs;
 
   assert(StartBlockTerm && StartBlockTerm->isUnconditional());
   assert(SI->hasOneUse());
@@ -226,12 +218,14 @@ void unfold(DomTreeUpdater *DTU, LoopInfo *LI, SelectInstToUnfold SIToUnfold,
   if (SelectInst *SIOp = dyn_cast<SelectInst>(SI->getTrueValue())) {
     createBasicBlockAndSinkSelectInst(DTU, SI, SIUse, SIOp, EndBlock,
                                       "si.unfold.true", &TrueBlock, &TrueBranch,
-                                      NewSIsToUnfold, NewBBs);
+                                      NewSIsToUnfold);
+    NewBBs.insert(TrueBlock);
   }
   if (SelectInst *SIOp = dyn_cast<SelectInst>(SI->getFalseValue())) {
     createBasicBlockAndSinkSelectInst(DTU, SI, SIUse, SIOp, EndBlock,
                                       "si.unfold.false", &FalseBlock,
-                                      &FalseBranch, NewSIsToUnfold, NewBBs);
+                                      &FalseBranch, NewSIsToUnfold);
+    NewBBs.insert(FalseBlock);
   }
 
   // If there was nothing to sink, then arbitrarily choose the 'false' side
@@ -239,7 +233,7 @@ void unfold(DomTreeUpdater *DTU, LoopInfo *LI, SelectInstToUnfold SIToUnfold,
   if (!TrueBlock && !FalseBlock) {
     FalseBlock = BasicBlock::Create(SI->getContext(), "si.unfold.false",
                                     EndBlock->getParent(), EndBlock);
-    NewBBs->push_back(FalseBlock);
+    NewBBs.insert(FalseBlock);
     BranchInst::Create(EndBlock, FalseBlock);
     DTU->applyUpdates({{DominatorTree::Insert, FalseBlock, EndBlock}});
   }
@@ -310,7 +304,7 @@ void unfold(DomTreeUpdater *DTU, LoopInfo *LI, SelectInstToUnfold SIToUnfold,
 
   // Preserve loop info
   if (Loop *L = LI->getLoopFor(SI->getParent())) {
-    for (BasicBlock *NewBB : *NewBBs)
+    for (BasicBlock *NewBB : NewBBs)
       L->addBasicBlockToLoop(NewBB, *LI);
   }
 
@@ -370,8 +364,10 @@ struct ThreadingPath {
   void setDeterminator(const BasicBlock *BB) { DBB = BB; }
 
   /// Path is a list of basic blocks.
+  void addToPath(BasicBlock *BB) { Path.push_back(BB); }
   const PathType &getPath() const { return Path; }
   void setPath(const PathType &NewPath) { Path = NewPath; }
+  void setPath(const PathType &&NewPath) { Path = move(NewPath); }
 
   void print(raw_ostream &OS) const {
     OS << Path << " [ " << ExitVal << ", " << DBB->getName() << " ]";
@@ -407,7 +403,7 @@ struct MainSwitch {
   virtual ~MainSwitch() = default;
 
   SwitchInst *getInstr() const { return Instr; }
-  const SmallVector<SelectInstToUnfold, 4> getSelectInsts() {
+  const SmallVector<SelectInstToUnfold, 4> &getSelectInsts() {
     return SelectInsts;
   }
 
@@ -434,8 +430,7 @@ private:
     addToQueue(SICond, nullptr, Q, SeenValues);
 
     while (!Q.empty()) {
-      Value *Current = Q.front().first;
-      BasicBlock *CurrentIncomingBB = Q.front().second;
+      auto [Current, CurrentIncomingBB] = Q.front();
       Q.pop_front();
 
       if (auto *Phi = dyn_cast<PHINode>(Current)) {
@@ -485,11 +480,11 @@ private:
                   SmallSet<Value *, 16> &SeenValues) {
     if (SeenValues.contains(Val))
       return;
-    Q.push_back({Val, BB});
+    Q.emplace_back(Val, BB);
     SeenValues.insert(Val);
   }
 
-  bool isValidSelectInst(SelectInst *SI) {
+  bool isValidSelectInst(SelectInst *SI) const {
     if (!SI->hasOneUse())
       return false;
 
@@ -513,7 +508,7 @@ private:
 
     // If select will not be sunk during unfolding, and it is in the same basic
     // block as another state defining select, then cannot unfold both.
-    for (SelectInstToUnfold SIToUnfold : SelectInsts) {
+    for (const SelectInstToUnfold &SIToUnfold : SelectInsts) {
       SelectInst *PrevSI = SIToUnfold.getInst();
       if (PrevSI->getTrueValue() != SI && PrevSI->getFalseValue() != SI &&
           PrevSI->getParent() == SI->getParent())
@@ -566,7 +561,7 @@ struct AllSwitchPaths {
           if (const ConstantInt *C = dyn_cast<const ConstantInt>(V)) {
             TPath.setExitValue(C);
             TPath.setDeterminator(BB);
-            TPath.setPath(Path);
+            TPath.setPath(move(Path));
           }
         }
 
@@ -578,7 +573,7 @@ struct AllSwitchPaths {
       }
 
       if (TPath.isExitValueSet() && isSupported(TPath))
-        TPaths.push_back(TPath);
+        TPaths.push_back(std::move(TPath));
     }
   }
 
@@ -628,10 +623,9 @@ private:
         continue;
 
       PathsType SuccPaths = paths(Succ, Visited, PathDepth + 1);
-      for (const PathType &Path : SuccPaths) {
-        PathType NewPath(Path);
-        NewPath.push_front(BB);
-        Res.push_back(NewPath);
+      for (PathType &Path : SuccPaths) {
+        Path.push_front(BB);
+        Res.push_back(move(Path));
         if (Res.size() >= MaxNumPaths) {
           return Res;
         }
@@ -904,9 +898,7 @@ private:
     BasicBlock *SwitchBlock = SwitchPaths->getSwitchBlock();
     for (ThreadingPath &TPath : SwitchPaths->getThreadingPaths()) {
       LLVM_DEBUG(dbgs() << TPath << "\n");
-      PathType NewPath(TPath.getPath());
-      NewPath.push_back(SwitchBlock);
-      TPath.setPath(NewPath);
+      TPath.addToPath(SwitchBlock);
     }
 
     // Transform the ThreadingPaths and keep track of the cloned values
@@ -1324,7 +1316,7 @@ bool DFAJumpThreading::run(Function &F) {
     SwitchPaths.run();
 
     if (SwitchPaths.getNumThreadingPaths() > 0) {
-      ThreadableLoops.push_back(SwitchPaths);
+      ThreadableLoops.push_back(std::move(SwitchPaths));
 
       // For the time being limit this optimization to occurring once in a
       // function since it can change the CFG significantly. This is not a
@@ -1344,7 +1336,7 @@ bool DFAJumpThreading::run(Function &F) {
   if (ThreadableLoops.size() > 0)
     CodeMetrics::collectEphemeralValues(&F, AC, EphValues);
 
-  for (AllSwitchPaths SwitchPaths : ThreadableLoops) {
+  for (AllSwitchPaths &SwitchPaths : ThreadableLoops) {
     TransformDFA Transform(&SwitchPaths, DT, AC, TTI, ORE, EphValues);
     Transform.run();
     MadeChanges = true;
