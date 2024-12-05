@@ -109,7 +109,7 @@ static cl::opt<unsigned> MaxNumVisitiedPaths(
     "dfa-max-num-visited-paths",
     cl::desc(
         "Max number of blocks visited while enumerating paths around a switch"),
-    cl::Hidden, cl::init(2000));
+    cl::Hidden, cl::init(3000));
 
 static cl::opt<unsigned>
     MaxNumPaths("dfa-max-num-paths",
@@ -783,7 +783,7 @@ private:
 
         // Any unpredictable value inside the loops means we must bail out.
         if (!isa<PHINode>(Incoming))
-          return StateDefMap();
+          continue;
 
         Stack.push_back(cast<PHINode>(Incoming));
       }
